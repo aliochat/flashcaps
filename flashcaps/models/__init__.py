@@ -1,0 +1,1 @@
+from .nic.nic import NicDecoder, NicModel

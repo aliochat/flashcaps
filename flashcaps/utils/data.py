@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from random import choice
 
 def get_collate_fn(tokenizer, sampling_strategy='random'):
@@ -39,8 +40,8 @@ def get_collate_fn(tokenizer, sampling_strategy='random'):
             raise NotImplementedError('Only random sampling strategy is supported for now!')
         
         tokenized_captions = tokenizer.encode_batch(captions)
-        token_ids = [item.ids for item in tokenized_captions]
+        token_ids = np.array([item.ids for item in tokenized_captions])
 
-        return torch.Tensor(feats), torch.Tensor(token_ids), idx
+        return torch.Tensor(np.array(feats)), torch.Tensor(token_ids), idx
     
     return collate_fn

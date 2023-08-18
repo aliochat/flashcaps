@@ -1,0 +1,26 @@
+decoder:
+  vocab_size: 10000
+  embedding_size: 256
+  hidden_size: 512
+  num_layers: 2
+  embedding_dropout: 0.5
+  lstm_dropout: 0.5
+  lm_dropout: 0.5
+  beam_size: 5
+  max_length: 30
+  repeat_penalty: -0.5
+
+encoder:
+  proj_dropout: 0.5
+  feature_size: 2048
+  hidden_size: 512
+
+inference:
+  beam_size: 5
+  max_length: 20
+
+training:
+  teacher_forcing_ratio: 0.8
+  learning_rate: 0.001
+  batch_size: 32
+  num_epochs: 10

@@ -1,3 +1,6 @@
-main.ipynb
+*.ipynb
 data/
 .venv/
+lightning_logs/
+__pycache__/
+*.pyc
