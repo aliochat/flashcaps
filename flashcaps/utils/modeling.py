@@ -47,7 +47,6 @@ def get_activ_function(activ_name):
 
     return activation_functions[activ_name]
 
-
 class BeamSearch:
     def __init__(self, start_token_id, end_token_id, beam_size, max_length, device):
         self.start_token_id = start_token_id
@@ -65,6 +64,7 @@ class BeamSearch:
             new_beams = []
             for beam in beams:
                 token, score, state = beam
+                
                 logits, new_hidden, new_cell = step_func(token[-1].unsqueeze(0), *state)
                 probs = F.softmax(logits, dim=-1)
                 top_probs, top_indices = probs.topk(self.beam_size, dim=-1)
@@ -98,7 +98,8 @@ class BeamSearch:
         top_beams = []
 
         for i in range(batch_size):
-            single_initial_state = (initial_states[0][:, i:i+1], initial_states[1][:, i:i+1])
+            single_initial_state = (initial_states[0][:, i].unsqueeze(1).contiguous(), 
+                                    initial_states[1][:, i].unsqueeze(1).contiguous())
             top_beam = self._search_single(step_func, single_initial_state)
             top_beams.append(top_beam)
 
