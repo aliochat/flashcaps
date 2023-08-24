@@ -94,6 +94,8 @@ class NicDecoder(nn.Module):
         tuple
             The hidden and cell states of the LSTM.
         """
+        assert input.dim() == 3, f"Input tensor has dimensions {input.size()} but must have three dimensions. (L, N, D) Where L is the sequence length, N is the batch size, and D is the features size."
+        
         hidden = torch.zeros(
             self.config.num_layers,
             input.size(1),  # batch_size
@@ -106,7 +108,10 @@ class NicDecoder(nn.Module):
             self.config.hidden_size,
             device=self.device,
         )
+
+        
         _, (hidden, cell) = self.lstm(input, (hidden, cell))
+
         return _, hidden, cell
 
     def _step_func(self, step_input, step_hidden, step_cell):
@@ -116,9 +121,11 @@ class NicDecoder(nn.Module):
         Parameters
         ----------
         step_input : torch.Tensor
-            The input tensor for the current step.
+            The input tensor for the current step. 
+
         step_hidden : torch.Tensor
             The hidden state tensor for the current step.
+
         step_cell : torch.Tensor
             The cell state tensor for the current step.
 
