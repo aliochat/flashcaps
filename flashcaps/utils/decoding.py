@@ -112,7 +112,16 @@ class BeamSearchScorer(nn.Module):
 
     def hypo_add(self, hyp: torch.Tensor, sum_logprobs: float, batch_idx: int):
         """
-        Given a new hypothesis (hyp), its associated sum of log probabilities (sum_logprobs), and the index of the batch (batch_idx), the method calculates a score for the hypothesis based on the provided log probabilities. This score is adjusted with a length penalty factor. The method then determines whether the new hypothesis should be added to the list based on two conditions: either the batch's current count of hypotheses is less than the specified beam size, or the score of the new hypothesis is higher than the worst score among the current hypotheses for that batch. If either condition is met, the method inserts the hypothesis and its score into their respective lists, maintaining the order according to the score. If the number of hypotheses exceeds the beam size, the worst hypothesis is pruned from the list, and the worst score is updated. If there is still room for additional hypotheses, the method updates the worst score and the count of hypotheses for the batch. This process ensures that the hypotheses with the highest scores and the most potential for improvement are retained in the ongoing search.
+        Given a new hypothesis (hyp), its associated sum of log probabilities (sum_logprobs), and the index of the batch (batch_idx), 
+        the method calculates a score for the hypothesis based on the provided log probabilities. This score is adjusted with a length penalty factor. 
+        The method then determines whether the new hypothesis should be added to the list based on two conditions: 
+        - batch's current count of hypotheses is less than the specified beam size, or 
+        - score of the new hypothesis is higher than the worst score among the current hypotheses for that batch. 
+        
+        If either condition is met, the method inserts the hypothesis and its score into their respective lists, 
+        maintaining the order according to the score. If the number of hypotheses exceeds the beam size, the worst hypothesis is pruned from the list, 
+        and the worst score is updated. If there is still room for additional hypotheses, the method updates the worst score and the count of hypotheses for the batch. 
+        This process ensures that the hypotheses with the highest scores and the most potential for improvement are retained in the ongoing search.
 
         Parameters:
         -----------
@@ -170,7 +179,12 @@ class BeamSearchScorer(nn.Module):
         self, batch_idx: int, best_sum_logprobs: float, cur_len: int
     ) -> bool:
         """
-        determines if hypothesis generation is complete for a batch. It first checks if there are enough hypotheses based on the beam size. If early stopping is enabled, it returns True. Otherwise, it compares the score of the best possible hypothesis for the current step (determined by best_sum_logprobs and cur_len) with the worst score among existing hypotheses for that batch. If the worst existing hypothesis is better or equal, the method returns True, indicating completion. Otherwise, it returns False, indicating that further generation is needed for the batch. This process ensures that if new hypotheses are unlikely to surpass the worst ones, the batch is marked as done, optimizing efficiency in beam search.
+        determines if hypothesis generation is complete for a batch. It first checks if there are enough hypotheses based on the beam size. 
+        If early stopping is enabled, it returns True. Otherwise, it compares the score of the best possible hypothesis for the current step 
+        (determined by best_sum_logprobs and cur_len) with the worst score among existing hypotheses for that batch. 
+        If the worst existing hypothesis is better or equal, the method returns True, indicating completion. 
+        Otherwise, it returns False, indicating that further generation is needed for the batch. 
+        This process ensures that if new hypotheses are unlikely to surpass the worst ones, the batch is marked as done, optimizing efficiency in beam search.
 
         Parameters:
         -----------
