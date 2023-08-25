@@ -78,10 +78,11 @@ class BeamSearch(nn.Module):
 
         self.device = device
 
-    def init(self):
+    def init(self, batch_size: int):
         """
         Reinitialize the beam search state.
         """
+        self.batch_size = batch_size
         self._done = torch.zeros(self.batch_size, dtype=torch.bool, device=self.device)
         self._beam_hyps_count = torch.zeros(
             self.batch_size, dtype=torch.long, device=self.device
@@ -393,9 +394,13 @@ class BeamSearch(nn.Module):
     def search(
         self,
         step_function,
-        init_states
+        init_states,
+        batch_size=None
     ):
         
+        if batch_size is not None:
+            self.init(batch_size)
+
         # Initialize the beam search
         self.init()
 
