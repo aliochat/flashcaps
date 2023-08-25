@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
-import torch.functional as F
+import torch.nn.functional as F
 
 
-class BeamSearchScorer(nn.Module):
+class BeamSearch(nn.Module):
     def __init__(
         self,
         beam_size: int,
         batch_size: int,
+        vocab_size: int,
         max_length: int,
         length_penalty: float,
         early_stopping: bool,
@@ -27,6 +28,9 @@ class BeamSearchScorer(nn.Module):
 
         batch_size : int
             Size of the input batch.
+
+        vocab_size : int
+            Size of the vocabulary.
 
         max_length : int
             Maximum length of the generated hypotheses.
@@ -55,6 +59,7 @@ class BeamSearchScorer(nn.Module):
         super().__init__()
         self.beam_size = beam_size
         self.batch_size = batch_size
+        self.vocab_size = vocab_size
 
         self.max_length = max_length
         self.length_penalty = length_penalty
@@ -71,6 +76,8 @@ class BeamSearchScorer(nn.Module):
         self._beam_hyps = []
         self._beam_scores = []
 
+        self.device = device
+
     def init(self):
         """
         Reinitialize the beam search state.
@@ -79,6 +86,7 @@ class BeamSearchScorer(nn.Module):
         self._beam_hyps_count = torch.zeros(
             self.batch_size, dtype=torch.long, device=self.device
         )
+
         self._beam_hyps_worst_scores = (
             torch.zeros(self.batch_size, device=self.device) + 1e9
         )
@@ -112,17 +120,7 @@ class BeamSearchScorer(nn.Module):
 
     def hypo_add(self, hyp: torch.Tensor, sum_logprobs: float, batch_idx: int):
         """
-        Given a new hypothesis (hyp), its associated sum of log probabilities (sum_logprobs), and the index of the batch (batch_idx), 
-        the method calculates a score for the hypothesis based on the provided log probabilities. This score is adjusted with a length penalty factor. 
-        The method then determines whether the new hypothesis should be added to the list based on two conditions: 
-        - batch's current count of hypotheses is less than the specified beam size, or 
-        - score of the new hypothesis is higher than the worst score among the current hypotheses for that batch. 
-        
-        If either condition is met, the method inserts the hypothesis and its score into their respective lists, 
-        maintaining the order according to the score. If the number of hypotheses exceeds the beam size, the worst hypothesis is pruned from the list, 
-        and the worst score is updated. If there is still room for additional hypotheses, the method updates the worst score and the count of hypotheses for the batch. 
-        This process ensures that the hypotheses with the highest scores and the most potential for improvement are retained in the ongoing search.
-
+        Add a new hypothesis to the beam.
         Parameters:
         -----------
         hyp : torch.Tensor)
@@ -179,12 +177,7 @@ class BeamSearchScorer(nn.Module):
         self, batch_idx: int, best_sum_logprobs: float, cur_len: int
     ) -> bool:
         """
-        determines if hypothesis generation is complete for a batch. It first checks if there are enough hypotheses based on the beam size. 
-        If early stopping is enabled, it returns True. Otherwise, it compares the score of the best possible hypothesis for the current step 
-        (determined by best_sum_logprobs and cur_len) with the worst score among existing hypotheses for that batch. 
-        If the worst existing hypothesis is better or equal, the method returns True, indicating completion. 
-        Otherwise, it returns False, indicating that further generation is needed for the batch. 
-        This process ensures that if new hypotheses are unlikely to surpass the worst ones, the batch is marked as done, optimizing efficiency in beam search.
+        Determines if hypothesis generation is complete for a batch.
 
         Parameters:
         -----------
@@ -325,42 +318,25 @@ class BeamSearchScorer(nn.Module):
         self,
         input_ids: torch.Tensor,
         final_beam_scores: torch.Tensor,
-        final_beam_tokens: torch.Tensor,
-        final_beam_indices: torch.Tensor,
-        pad_token_id: int,
-        eos_token_id: int,
     ) -> tuple:
         """
         Finalize beam search and return generated hypotheses.
 
         Parameters:
         -----------
-            input_ids : torch.Tensor)
-                Input tokens.
+        input_ids : torch.Tensor
+            Input tokens.
 
-            final_beam_scores : torch.Tensor
-                Scores of the final beams.
-
-            final_beam_tokens : torch.Tensor
-                Tokens of the final beams.
-
-            final_beam_indices : torch.Tensor
-                Indices of the final beams.
-
-            pad_token_id : int
-                ID of the padding token.
-
-            eos_token_id : int
-                ID of the end-of-sequence token.
+        final_beam_scores : torch.Tensor
+            Scores of the final beams.
 
         Returns:
+        --------
             tuple: (decoded, best_scores)
         """
 
-        batch_size = len(self._beam_hyps_count)
-
         # finalize all open beam hypotheses and add to generated hypotheses
-        for batch_idx in range(batch_size):
+        for batch_idx in range(self.batch_size):
             if self._done[batch_idx]:
                 continue
 
@@ -372,28 +348,22 @@ class BeamSearchScorer(nn.Module):
                 final_tokens = input_ids[batch_beam_idx]
                 self.hypo_add(final_tokens, final_score, batch_idx)
 
-        sent_lengths = torch.zeros(
-            batch_size * self.num_hypo_to_return, dtype=torch.long
-        )
+        sent_lengths = torch.zeros(self.batch_size * self.num_hypo_to_return, dtype=torch.long)
+        
         best = []
         best_scores = torch.zeros(
-            batch_size * self.num_hypo_to_return,
-            device=input_ids.device,
+            self.batch_size * self.num_hypo_to_return,
+            device=self.device,
             dtype=torch.float32,
         )
+        
         # retrieve best hypotheses
-        for i in range(batch_size):
-            # NOTE: lambda is not scriptable
-            batch_hypo_start = (
-                torch.sum(self._beam_hyps_count[:i])
-                if i > 0
-                else torch.tensor(0, dtype=torch.long)
-            )
+        for i in range(self.batch_size):
+            batch_hypo_start = torch.sum(self._beam_hyps_count[:i]) if i > 0 else torch.tensor(0, dtype=torch.long)
+            
             batch_hypo_end = torch.sum(self._beam_hyps_count[: i + 1])
             beam_scores = torch.cat(self._beam_scores)[batch_hypo_start:batch_hypo_end]
-            sorted_next_scores, sorted_indices = torch.topk(
-                beam_scores, len(beam_scores), largest=True
-            )
+            _, sorted_indices = torch.topk(beam_scores, len(beam_scores), largest=True)
 
             for j in range(self.num_hypo_to_return):
                 best_score = beam_scores[sorted_indices[j]]
@@ -405,113 +375,79 @@ class BeamSearchScorer(nn.Module):
 
         # prepare for adding eos
         sent_max_len = min(sent_lengths.max() + 1, self.max_length)
-        decoded = torch.zeros(
-            batch_size * self.num_hypo_to_return, sent_max_len, dtype=torch.long
-        )
+        decoded = torch.zeros(self.batch_size * self.num_hypo_to_return, sent_max_len, dtype=torch.long)
+        
         # shorter batches are padded if needed
         if sent_lengths.min() != sent_lengths.max():
-            assert pad_token_id is not None, "`pad_token_id` has to be defined"
-            decoded.fill_(pad_token_id)
+            assert self.pad_token_id is not None, "`pad_token_id` has to be defined"
+            decoded.fill_(self.pad_token_id)
 
         # fill with hypotheses and eos_token_id if the latter fits in
         for i, hypo in enumerate(best):
             decoded[i, : sent_lengths[i]] = hypo
             if sent_lengths[i] < self.max_length:
-                decoded[i, sent_lengths[i]] = eos_token_id
+                decoded[i, sent_lengths[i]] = self.eos_token_id
 
         return decoded, best_scores
 
+    def search(
+        self,
+        step_function,
+        init_states
+    ):
+        
+        # Initialize the beam search
+        self.init()
 
-def beam_search(
-    init_hidden,
-    init_cell,
-    step_function,
-    beam_scorer,
-    batch_size,
-    beam_size,
-    max_length,
-    vocab_size,
-    bos_token_id,
-    pad_token_id,
-    eos_token_id,
-):
-    # Inputs of shape (1, batch_size * beam_size, cur_len)
-
-    input_ids = torch.full(
-        (batch_size * beam_size, 1),
-        bos_token_id,
-        dtype=torch.long,
-        device=init_hidden.device,
-    )
-    hidden = init_hidden.repeat_interleave(beam_size, dim=1)
-    cell = init_cell.repeat_interleave(beam_size, dim=1)
-
-    beam_scores = torch.zeros(
-        (batch_size, beam_size), dtype=torch.float, device=input_ids.device
-    )
-
-    # The first beam is only selected at first.
-    beam_scores[:, 1:] = -1e9
-    beam_scores = beam_scores.view((batch_size * beam_size,))
-    next_tokens = torch.zeros(
-        (batch_size, beam_size), dtype=torch.long, device=input_ids.device
-    )
-    next_indices = torch.zeros(
-        (batch_size, beam_size), dtype=torch.long, device=input_ids.device
-    )
-
-    cur_len = 1
-    while cur_len < max_length:
-        # Decoder forward step
-        logits, hidden, cell = step_function(input_ids[..., -1], hidden, cell)
-        next_token_scores = F.log_softmax(
-            logits, dim=-1
-        )  # (batch_size * num_beams, vocab_size)
-
-        # pre-process distribution
-
-        ## Add beam scores to each token
-        next_token_scores = next_token_scores + beam_scores.unsqueeze(1).expand_as(
-            next_token_scores
+        # Inputs of shape (batch_size * beam_size, 1)
+        input_ids = torch.full(
+            (self.batch_size * self.beam_size, 1),
+            self.bos_token_id,
+            dtype=torch.long,
+            device=self.device,
         )
 
-        # We select the top 2 * beam_size tokens
-        next_token_scores = next_token_scores.view(batch_size, beam_size * vocab_size)
-        next_token_scores, next_tokens = torch.topk(
-            next_token_scores, 2 * beam_size, dim=1, largest=True, sorted=True
-        )
+        init_hidden, init_cell = init_states
+        hidden = init_hidden.repeat_interleave(self.beam_size, dim=1)
+        cell = init_cell.repeat_interleave(self.beam_size, dim=1)
 
-        # Scores of shape (batch_size, BEAM_SIZE * VOCAB_SIZE), we need to find from which beam the tokens come from and the actual token ids.
-        next_indices = (
-            next_tokens // vocab_size
-        )  # This returns a tensor with values from 0 -> beam_size identifying the beam.
-        next_tokens = (
-            next_tokens % vocab_size
-        )  # This returns a tensor with values from 0 -> vocab_size identifying the token.
+        beam_scores = torch.zeros((self.batch_size, self.beam_size), dtype=torch.float, device=self.device)
 
-        # This takes the input_ids, the scores and tokens of the next step. -> Beam_scores, choosen next tokens with their indices
-        beam_scores, beam_next_tokens, beam_idx = beam_scorer.process(
-            input_ids, next_token_scores, next_tokens, next_indices
-        )
+        # The first beam is only selected at first.
+        beam_scores[:, 1:] = -1e9
+        beam_scores = beam_scores.view((self.batch_size * self.beam_size,))
+        next_tokens = torch.zeros((self.batch_size, self.beam_size), dtype=torch.long, device=self.device)
+        next_indices = torch.zeros((self.batch_size, self.beam_size), dtype=torch.long, device=self.device)
 
-        input_ids = torch.cat(
-            [input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1
-        )
-        hidden = hidden[:, beam_idx, :]
-        cell = cell[:, beam_idx, :]
+        cur_len = 1
+        
+        while cur_len < self.max_length:
+            # Decoder forward step
+            logits, hidden, cell = step_function(input_ids[..., -1], hidden, cell)
+            next_token_scores = F.log_softmax(logits, dim=-1) # (batch_size * num_beams, vocab_size)
 
-        if beam_scorer.is_done():
-            break
+            ## Add beam scores to each token
+            next_token_scores = next_token_scores + beam_scores.unsqueeze(1).expand_as(next_token_scores)
 
-        cur_len = cur_len + 1
+            # We select the top 2 * beam_size tokens
+            next_token_scores = next_token_scores.view(self.batch_size, self.beam_size * self.vocab_size)
+            next_token_scores, next_tokens = torch.topk(next_token_scores, 2 * self.beam_size, dim=1, largest=True, sorted=True)
 
-    sequences, sequence_scores = beam_scorer.finalize(
-        input_ids,
-        beam_scores,
-        next_tokens,
-        next_indices,
-        pad_token_id=pad_token_id,
-        eos_token_id=eos_token_id,
-    )
+            # Scores of shape (batch_size, BEAM_SIZE * VOCAB_SIZE), we need to find from which beam the tokens come from and the actual token ids.
+            next_indices = (next_tokens // self.vocab_size)
+            next_tokens = (next_tokens % self.vocab_size)
 
-    return sequences, sequence_scores
+            # This takes the input_ids, the scores and tokens of the next step. -> Beam_scores, choosen next tokens with their indices
+            beam_scores, beam_next_tokens, beam_idx = self.process(input_ids, next_token_scores, next_tokens, next_indices)
+
+            input_ids = torch.cat([input_ids[beam_idx, :], beam_next_tokens.unsqueeze(-1)], dim=-1)
+            hidden = hidden[:, beam_idx, :]
+            cell = cell[:, beam_idx, :]
+
+            if self.is_done():
+                break
+
+            cur_len = cur_len + 1
+
+        sequences, sequence_scores = self.finalize(input_ids, beam_scores)
+        return sequences, sequence_scores

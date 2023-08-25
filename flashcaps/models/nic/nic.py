@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
-from ...utils.modeling import BeamSearch
 from ...utils.text import get_special_token
 
 
@@ -102,6 +101,7 @@ class NicDecoder(nn.Module):
             self.config.hidden_size,
             device=self.device,
         )
+
         cell = torch.zeros(
             self.config.num_layers,
             input.size(1),  # batch_size
@@ -114,7 +114,7 @@ class NicDecoder(nn.Module):
 
         return _, hidden, cell
 
-    def _step_func(self, step_input, step_hidden, step_cell):
+    def step_func(self, step_input, step_hidden, step_cell):
         """
         Defines the step function for beam search.
 

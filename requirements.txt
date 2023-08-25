@@ -2,4 +2,7 @@ torch
 torchvision
 numpy
 pycocoevalcap
-
+pytorch-lightning
+wandb
+tokenizers
+yacs
