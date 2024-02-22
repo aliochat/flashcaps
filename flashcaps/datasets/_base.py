@@ -1,9 +1,11 @@
 import os
 import numpy as np
+from PIL import Image
 
 from tqdm import tqdm
 from typing import List, Dict, Union, Tuple
 
+import torch
 from torch.utils.data import Dataset
 
 class ImageCaptioningDataset(Dataset):
@@ -162,3 +164,79 @@ class FeatureLoader:
                 raise FileNotFoundError(f"Feature file not found: {feature_path}")
                 
         return True
+    
+
+class ImageLoader:
+    def __init__(self, root_folder: str, transform=None, return_type='PIL'):
+        """
+        Initialize the ImageLoader to load images from a given directory.
+
+        Parameters
+        ----------
+        root_folder : str
+            The root directory containing the image files.
+
+        transform : callable, optional
+            A function/transform that takes in a PIL image and returns a transformed version.
+            E.g., resizing, cropping, normalization, etc.
+
+        return_type : str, optional
+            The type of the returned image data. Options: 'PIL' for PIL Image, 'numpy' for NumPy array,
+            and 'torch' for PyTorch Tensor. Default is 'PIL'.
+        """
+        self.root_folder = root_folder
+        self.transform = transform
+        self.return_type = return_type.lower()
+
+    def load(self, image_path: str):
+        """
+        Load an image from the given path, applying any specified transformations,
+        and return it in the specified format.
+
+        Parameters
+        ----------
+        image_path : str
+            The path to the image file.
+
+        Returns
+        -------
+        PIL.Image.Image | np.ndarray | torch.Tensor
+            The loaded (and possibly transformed) image in the specified return type.
+        """
+        full_path = os.path.join(self.root_folder, image_path)
+        image = Image.open(full_path).convert('RGB')  # Ensure image is in RGB format
+
+        if self.transform:
+            image = self.transform(image)
+        
+        if self.return_type == 'numpy':
+            return np.array(image)
+        
+        elif self.return_type == 'torch':
+            return torch.from_numpy(np.array(image)).permute(2, 0, 1)  # Convert HWC to CHW format
+        
+        else:  # Default to returning PIL Image
+            return image
+
+    def check_paths(self, annotations: list) -> bool:
+        """
+        Verify that all image files referenced in the annotations exist in the specified directory.
+
+        Parameters
+        ----------
+        annotations : list
+            A list of dictionaries, each containing an 'image_path' key.
+
+        Returns
+        -------
+        bool
+            True if all images exist, False otherwise.
+        """
+        for item in annotations:
+            image_path = item['image_path']
+            full_path = os.path.join(self.root_folder, image_path)
+            if not os.path.exists(full_path):
+                raise FileNotFoundError(f"Image file not found: {full_path}")
+                
+        return True
+
